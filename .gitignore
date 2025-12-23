@@ -241,3 +241,7 @@ lerna-debug.log*
 .tmp
 
 todo
+tmp
+records
+README-tmp.md
+test.py
