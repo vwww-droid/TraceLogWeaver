@@ -207,18 +207,80 @@ STACK_FILTER_KEYWORDS = [
 ]
 
 
-def parse_block(block_text: str) -> Optional[LogBlock]:
+def print_unparseable_block(block_text: str, reason: str = "Unknown"):
+    """
+    Format and print unparseable log block for debugging
+
+    Args:
+        block_text: Raw log block text
+        reason: Reason why parsing failed
+    """
+    lines = block_text.strip().split('\n')
+    
+    print("=" * 80)
+    print(f"UNPARSEABLE BLOCK - Reason: {reason}")
+    print("=" * 80)
+    
+    timestamp = None
+    log_type = None
+    class_name = None
+    method_name = None
+    key_fields = {}
+    in_stack = False
+    
+    for line in lines:
+        line_stripped = line.strip()
+        if line_stripped.startswith("时间:"):
+            timestamp = line_stripped.split("时间:", 1)[1].strip()
+            print(f"Timestamp: {timestamp}")
+        elif line_stripped.startswith("日志名称:"):
+            log_type = line_stripped.split("日志名称:", 1)[1].strip()
+            print(f"Log Type: {log_type} (NOT SUPPORTED)")
+        elif line_stripped.startswith("类名:"):
+            class_name = line_stripped.split("类名:", 1)[1].strip()
+            print(f"Class: {class_name}")
+        elif line_stripped.startswith("方法名:"):
+            method_name = line_stripped.split("方法名:", 1)[1].strip()
+            print(f"Method: {method_name}")
+        elif line_stripped.startswith("调用堆栈："):
+            in_stack = True
+        elif ":" in line_stripped and not in_stack and len(line_stripped) < 200:
+            parts = line_stripped.split(":", 1)
+            if len(parts) == 2:
+                key = parts[0].strip()
+                value = parts[1].strip()
+                if len(value) > 100:
+                    value = value[:100] + "..."
+                key_fields[key] = value
+    
+    if key_fields:
+        print("\nKey Fields:")
+        for key, value in key_fields.items():
+            print(f"  {key}: {value}")
+    
+    print("\nFull Content:")
+    print("-" * 80)
+    for i, line in enumerate(lines, 1):
+        print(f"{i:4d} | {line}")
+    print("-" * 80)
+    print()
+
+
+def parse_block(block_text: str, print_unparseable: bool = False) -> Optional[LogBlock]:
     """
     Parse a single log block into structured data class
 
     Args:
         block_text: Raw log block text
+        print_unparseable: If True, print unparseable blocks
 
     Returns:
         LogBlock subclass instance or None if parsing fails
     """
     lines = block_text.strip().split('\n')
     if len(lines) < 2:
+        if print_unparseable:
+            print_unparseable_block(block_text, "Too few lines")
         return None
 
     timestamp = None
@@ -228,6 +290,8 @@ def parse_block(block_text: str) -> Optional[LogBlock]:
             break
 
     if not timestamp:
+        if print_unparseable:
+            print_unparseable_block(block_text, "Missing timestamp")
         return None
 
     log_type = None
@@ -251,12 +315,15 @@ def parse_block(block_text: str) -> Optional[LogBlock]:
         log_type = "method_hook"
 
     if not log_type:
+        if print_unparseable:
+            print_unparseable_block(block_text, "Missing log type")
         return None
 
     log_type_normalized = log_type.lower()
 
     if log_type_normalized not in LOG_TYPE_MAP:
-        print(f"Unsupported log type: {log_type}")
+        if print_unparseable:
+            print_unparseable_block(block_text, f"Unsupported log type: {log_type}")
         return None
 
     log_class = LOG_TYPE_MAP[log_type_normalized]
@@ -565,13 +632,14 @@ def parse_log_blocks(log_path: str) -> List[str]:
     return blocks
 
 
-def parse_all_blocks(log_path: str, limit: Optional[int] = None) -> List[LogBlock]:
+def parse_all_blocks(log_path: str, limit: Optional[int] = None, print_unparseable: bool = False) -> List[LogBlock]:
     """
     Parse all log blocks from file
 
     Args:
         log_path: Path to log file
         limit: Optional limit on number of blocks to parse
+        print_unparseable: If True, print unparseable blocks
 
     Returns:
         List of LogBlock instances
@@ -582,12 +650,96 @@ def parse_all_blocks(log_path: str, limit: Optional[int] = None) -> List[LogBloc
         blocks_text = blocks_text[:limit]
 
     parsed_blocks = []
+    unparseable_count = 0
+    
     for block_text in blocks_text:
-        log_block = parse_block(block_text)
+        log_block = parse_block(block_text, print_unparseable=print_unparseable)
         if log_block:
             parsed_blocks.append(log_block)
-
+        else:
+            unparseable_count += 1
+    
+    if print_unparseable and unparseable_count > 0:
+        print(f"\nTotal unparseable blocks: {unparseable_count} / {len(blocks_text)}")
+    
     return parsed_blocks
+
+
+def print_all_unparseable_blocks(log_path: str, limit: Optional[int] = None):
+    """
+    Find and print all unparseable blocks from log file
+
+    Args:
+        log_path: Path to log file
+        limit: Optional limit on number of blocks to check
+    """
+    blocks_text = parse_log_blocks(log_path)
+    
+    if limit:
+        blocks_text = blocks_text[:limit]
+    
+    unparseable_blocks = []
+    
+    for block_text in blocks_text:
+        lines = block_text.strip().split('\n')
+        if len(lines) < 2:
+            unparseable_blocks.append((block_text, "Too few lines"))
+            continue
+        
+        timestamp = None
+        for line in lines:
+            if line.startswith("时间:"):
+                timestamp = line.split("时间:")[1].strip()
+                break
+        
+        if not timestamp:
+            unparseable_blocks.append((block_text, "Missing timestamp"))
+            continue
+        
+        log_type = None
+        class_name = None
+        method_name = None
+        
+        for line in lines:
+            if line.startswith("日志名称:"):
+                log_type = line.split("日志名称:")[1].strip()
+                break
+            elif line.startswith("类名:"):
+                class_name = line.split("类名:")[1].strip()
+            elif line.startswith("方法名:"):
+                method_name = line.split("方法名:")[1].strip()
+                if method_name == "读入配置文件":
+                    log_type = "读入配置文件"
+                break
+        
+        if not log_type and class_name and method_name:
+            log_type = "method_hook"
+        
+        if not log_type:
+            unparseable_blocks.append((block_text, "Missing log type"))
+            continue
+        
+        log_type_normalized = log_type.lower()
+        if log_type_normalized not in LOG_TYPE_MAP:
+            unparseable_blocks.append((block_text, f"Unsupported log type: {log_type}"))
+            continue
+    
+    print(f"\nFound {len(unparseable_blocks)} unparseable blocks out of {len(blocks_text)} total blocks\n")
+    
+    seen_reasons = {}
+    for block_text, reason in unparseable_blocks:
+        if reason not in seen_reasons:
+            seen_reasons[reason] = []
+        seen_reasons[reason].append(block_text)
+    
+    print(f"Unparseable reasons breakdown:")
+    for reason, blocks in seen_reasons.items():
+        print(f"  {reason}: {len(blocks)} blocks")
+    print()
+    
+    for i, (block_text, reason) in enumerate(unparseable_blocks, 1):
+        print(f"[Block {i}/{len(unparseable_blocks)}]")
+        print_unparseable_block(block_text, reason)
 
 
 def print_sample_blocks(log_path: str):
