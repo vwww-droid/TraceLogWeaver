@@ -128,14 +128,18 @@ def extract_all_fields(block: LogBlock) -> Dict[str, Any]:
     return fields
 
 
-def search_blocks(blocks: List[LogBlock], search_string: str, exact_match: bool = True) -> List[Dict[str, Any]]:
+def search_blocks(blocks: List[LogBlock], search_string: str) -> List[Dict[str, Any]]:
     """
-    Search for a string in all log blocks
+    Search for a string in all log blocks with automatic bidirectional matching
+    
+    Supports:
+    - Exact match: field_value == search_string
+    - Contains match: search_string in field_value
+    - Contained match: field_value in search_string
     
     Args:
         blocks: List of parsed log blocks
         search_string: String to search for
-        exact_match: If True, require exact match; if False, use substring match
         
     Returns:
         List of matches, each containing block index, field name, and matched value
@@ -150,41 +154,46 @@ def search_blocks(blocks: List[LogBlock], search_string: str, exact_match: bool 
                 continue
                 
             field_str = str(field_value)
+            matched = False
+            match_type = None
             
-            if exact_match:
-                if field_str == search_string:
-                    matches.append({
-                        'block_index': idx,
-                        'block': block,
-                        'field_name': field_name,
-                        'field_value': field_value
-                    })
-            else:
-                if search_string in field_str:
-                    matches.append({
-                        'block_index': idx,
-                        'block': block,
-                        'field_name': field_name,
-                        'field_value': field_value
-                    })
+            # Try exact match first
+            if field_str == search_string:
+                matched = True
+                match_type = "exact"
+            # Then bidirectional substring match
+            elif search_string in field_str:
+                matched = True
+                match_type = "contains"
+            elif field_str in search_string:
+                matched = True
+                match_type = "contained"
+            
+            if matched:
+                matches.append({
+                    'block_index': idx,
+                    'block': block,
+                    'field_name': field_name,
+                    'field_value': field_value,
+                    'match_type': match_type
+                })
     
     return matches
 
 
-def print_matches(matches: List[Dict[str, Any]], search_string: str, exact_match: bool):
+def print_matches(matches: List[Dict[str, Any]], search_string: str):
     """
     Print search results in a formatted way
     
     Args:
         matches: List of match dictionaries
         search_string: The search string used
-        exact_match: Whether exact match was used
     """
     if not matches:
-        print(f"No matches found for '{search_string}' ({'exact' if exact_match else 'substring'} match)")
+        print(f"No matches found for '{search_string}'")
         return
     
-    print(f"Found {len(matches)} match(es) for '{search_string}' ({'exact' if exact_match else 'substring'} match)\n")
+    print(f"Found {len(matches)} match(es) for '{search_string}'\n")
     
     for i, match in enumerate(matches, 1):
         block = match['block']
@@ -199,6 +208,13 @@ def print_matches(matches: List[Dict[str, Any]], search_string: str, exact_match
         print(f"Log Type: {block.log_type}")
         print(f"Matched Field: {field_name}")
         print(f"Matched Value: {field_value}")
+        if 'match_type' in match:
+            match_type_desc = {
+                'exact': 'Exact match',
+                'contains': 'Search string is in field value',
+                'contained': 'Field value is in search string'
+            }
+            print(f"Match Type: {match_type_desc.get(match['match_type'], match['match_type'])}")
         
         # Show additional context based on block type
         if isinstance(block, MethodHookLogBlock):
@@ -226,15 +242,12 @@ def print_matches(matches: List[Dict[str, Any]], search_string: str, exact_match
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Search for strings in parsed log blocks',
+        description='Search for strings in parsed log blocks (supports exact, contains, and contained matching)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Exact match search
+  # Search with automatic bidirectional matching
   python log_search.py log.txt "some_string"
-  
-  # Substring match search
-  python log_search.py log.txt "some_string" --substring
   
   # Limit number of blocks to parse
   python log_search.py log.txt "some_string" --limit 1000
@@ -243,8 +256,6 @@ Examples:
     
     parser.add_argument('log_path', help='Path to log file')
     parser.add_argument('search_string', help='String to search for')
-    parser.add_argument('--substring', action='store_true', 
-                       help='Use substring match instead of exact match')
     parser.add_argument('--limit', type=int, default=None,
                        help='Limit number of blocks to parse')
     parser.add_argument('--quiet', action='store_true',
@@ -264,12 +275,11 @@ Examples:
     if not args.quiet:
         print(f"Parsed {len(blocks)} blocks\n")
     
-    # Search
-    exact_match = not args.substring
-    matches = search_blocks(blocks, args.search_string, exact_match=exact_match)
+    # Search with automatic bidirectional matching
+    matches = search_blocks(blocks, args.search_string)
     
     # Print results
-    print_matches(matches, args.search_string, exact_match)
+    print_matches(matches, args.search_string)
 
 
 if __name__ == '__main__':

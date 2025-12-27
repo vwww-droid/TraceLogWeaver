@@ -21,7 +21,10 @@
 ### 搜索结构化数据
 `log_search.py` - 在解析后的结构化日志数据中搜索指定字符串.
 
-- 支持完全匹配和子串匹配
+- **自动双向匹配**: 自动支持完全匹配、正向子串匹配和反向子串匹配
+  - 完全匹配: 字段值 == 搜索字符串
+  - 正向匹配: 搜索字符串是字段值的子串
+  - 反向匹配: 字段值是搜索字符串的子串
 - 搜索所有字段(包括参数、返回值、密钥、内容等)
 - 显示匹配的块信息和上下文
 - 支持限制解析数量以加快搜索速度
@@ -52,11 +55,8 @@ print_all_unparseable_blocks("log.txt", limit=100)
 ### 命令行搜索工具
 
 ```bash
-# 完全匹配搜索
+# 搜索(自动支持完全匹配、正向和反向子串匹配)
 python log_search.py log.txt "search_string"
-
-# 子串匹配搜索
-python log_search.py log.txt "search_string" --substring
 
 # 限制解析数量以加快搜索
 python log_search.py log.txt "search_string" --limit 1000
